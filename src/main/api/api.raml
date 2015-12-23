@@ -1,0 +1,37 @@
+#%RAML 0.8
+title: construction-write-api
+version: 1
+
+/parts/{part_id}:
+  description: Update the part information
+  put:
+    body:
+      application/xml:
+        example: | 
+          <part>
+            <item-id>1</item-id>
+            <type>Skrews</type>
+            <currency>CHF</currency>
+            <price>3992</price>
+            <link rel="self" href="/parts/1" />
+          </part>
+        schema: !include put-part-instance-schema.xsd
+    responses:
+      204:
+/suppliers:
+  description: add a supplier to a suppliers list resource
+  post:
+    body:
+      application/xml:
+        example: |
+          <supplier>
+            <supplierId></supplierId>
+            <supplierName>Klein und Gut</supplierName>
+            <supplierLocation>DE</supplierLocation>
+          </supplier>
+        schema: !include post-supplier-instance-schema.xsd
+    responses:
+      201:
+        headers:
+          Location:
+            example: http://host.de/suppliers/224

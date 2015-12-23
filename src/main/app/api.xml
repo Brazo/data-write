@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:GoogleCurrencyConnector="http://www.mulesoft.org/schema/mule/GoogleCurrencyConnector" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/GoogleCurrencyConnector http://www.mulesoft.org/schema/mule/GoogleCurrencyConnector/current/mule-GoogleCurrencyConnector.xsd">
+    <http:listener-config name="api-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+     <db:mysql-config name="MySQL_Configuration" host="localhost" port="3306" user="const" password="const" database="construction_machines" doc:name="MySQL Configuration"/>
+    <apikit:config name="api-config" raml="api.raml" consoleEnabled="true" consolePath="console" doc:name="Router"/>
+    <GoogleCurrencyConnector:config-type name="Google_Currency_Connector__No_auth_strategy" username="a" password="a" doc:name="Google Currency Connector: No auth strategy"/>
+    <flow name="api-main">
+        <http:listener config-ref="api-httpListenerConfig" path="/write/*" doc:name="HTTP"/>
+        <apikit:router config-ref="api-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="api-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="put:/parts/{part_id}:application/xml:api-config">
+        <dw:transform-message doc:name="XML to Java Map Transformation">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+        </dw:transform-message>
+        <enricher source="#[payload]" target="#[flowVars.euroObject]" doc:name="Enrich euro price">
+            <flow-ref name="create-euro-price" doc:name="create-euro-price"/>
+        </enricher>
+        <enricher source="#[payload]" target="#[flowVars.usdObject]" doc:name="Enrich usd price">
+            <flow-ref name="create-usd-price" doc:name="create-usd-price"/>
+        </enricher>
+        <db:update config-ref="MySQL_Configuration" doc:name="Update Part in Legacy DB">
+            <db:parameterized-query><![CDATA[UPDATE construction_machines.item
+SET
+price_euro = #[flowVars.euroObject.toPrice],
+price_usd = #[flowVars.usdObject.toPrice]
+WHERE item_id = #[flowVars.part_id]]]></db:parameterized-query>
+        </db:update>
+    </flow>
+    <sub-flow name="create-usd-price">
+        <GoogleCurrencyConnector:exchange-currency config-ref="Google_Currency_Connector__No_auth_strategy" fromCurrency="#[payload.part.currency]" toCurrency="#['USD']" value="#[payload.part.price]" doc:name="Google Currency Connector"/>
+    </sub-flow>
+    <sub-flow name="create-euro-price">
+        <GoogleCurrencyConnector:exchange-currency config-ref="Google_Currency_Connector__No_auth_strategy" fromCurrency="#[payload.part.currency]" toCurrency="#['EUR']" value="#[payload.part.price]" doc:name="Google Currency Connector"/>
+    </sub-flow>
+    <flow name="post:/suppliers:application/xml:api-config">
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" doc:name="Insert Record into DB">
+            <db:parameterized-query><![CDATA[INSERT INTO construction_machines.suppliers
+(supplier_name,
+supplier_address)
+VALUES
+(#[payload.supplier.supplierName],
+#[payload.supplier.supplierLocation]);]]></db:parameterized-query>
+        </db:insert>
+        <set-property propertyName="Location" value="#['http://localhost:8081/suppliers/search']" doc:name="Property"/>
+    </flow>
+    <apikit:mapping-exception-strategy name="api-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>
